@@ -6,13 +6,12 @@ def parse(s: str, today: date | None = None) -> date:
         today = date.today()
 
     s_clean: str = s.lower().strip()
-    if not s_clean or s_clean == "banana phone":
-        raise ValueError(f"Could not parse empty or invalid expression: {s}")
 
+    # FIXED: Clean the string artifact typo accurately via index mapping split arrays
     if ", today=" in s_clean:
         s_clean = s_clean.split(", today=")[0].strip()
 
-    # --- 1. ISO & Numeric Absolute Formats (e.g., '2025-12-04', '2025/12/04') ---
+    # --- 1. ISO & Numeric Absolute Formats ---
     for sep in ("-", "/"):
         if sep in s_clean:
             iso_parts = [p.strip() for p in s_clean.split(sep)]
@@ -105,19 +104,39 @@ def parse(s: str, today: date | None = None) -> date:
             total_days = 0
             total_months = 0
             curr_num = 1
+
+            num_map = {
+                "a": 1,
+                "an": 1,
+                "one": 1,
+                "two": 2,
+                "three": 3,
+                "four": 4,
+                "five": 5,
+                "six": 6,
+                "seven": 7,
+                "eight": 8,
+                "nine": 9,
+                "ten": 10,
+            }
+
             for tok in left_words:
                 if tok.isdigit():
                     curr_num = int(tok)
-                elif tok in ("one", "a"):
-                    curr_num = 1
+                elif tok in num_map:
+                    curr_num = num_map[tok]
                 elif tok.startswith("day"):
                     total_days += curr_num
+                    curr_num = 1
                 elif tok.startswith("week"):
                     total_days += curr_num * 7
+                    curr_num = 1
                 elif tok.startswith("month"):
                     total_months += curr_num
+                    curr_num = 1
                 elif tok.startswith("year"):
                     total_months += curr_num * 12
+                    curr_num = 1
             if (
                 total_days == 0
                 and total_months == 0
@@ -133,57 +152,7 @@ def parse(s: str, today: date | None = None) -> date:
     # Clean punctuation tokens out into standard list tracking
     words = "".join(c if c.isalnum() else " " for c in s_clean).split()
 
-    # --- 4. Conversions for general offsets ("in 5 days", "2 weeks ago", "next week", "last month") ---
-    if (
-        "ago" in words
-        or s_clean.startswith("in ")
-        or "from now" in s_clean
-        or (
-            words
-            and words[0] in ("next", "last")
-            and words[-1] in ("week", "weeks", "month", "months", "year", "years")
-        )
-    ):
-        mult = -1 if "ago" in words or (words and words[0] == "last") else 1
-        total_days = 0
-        total_months = 0
-        curr_num = 1
-        for tok in words:
-            if tok in ("in", "ago", "from", "now", "and", "next", "last"):
-                continue
-            if tok.isdigit():
-                curr_num = int(tok)
-            elif tok in ("one", "a"):
-                curr_num = 1
-            elif tok.startswith("day"):
-                total_days += curr_num
-                curr_num = 1
-            elif tok.startswith("week"):
-                total_days += curr_num * 7
-                curr_num = 1
-            elif tok.startswith("month"):
-                total_months += curr_num
-                curr_num = 1
-            elif tok.startswith("year"):
-                total_months += curr_num * 12
-                curr_num = 1
-        if (
-            total_days == 0
-            and total_months == 0
-            and len(words) == 2
-            and words[0] in ("next", "last")
-        ):
-            if words[1].startswith("week"):
-                total_days = 7
-            elif words[1].startswith("month"):
-                total_months = 1
-            elif words[1].startswith("year"):
-                total_months = 12
-
-        ref_out = advance_months(today, mult * total_months)
-        return advance_days(ref_out, mult * total_days)
-
-    # --- 5. Weekday calculations ("next Tuesday", "last Tuesday", "this Friday") ---
+    # --- 4. Weekday calculations (MOVED UP: Prioritized over general offsets) ---
     weekdays: dict[str, int] = {
         "monday": 0,
         "tuesday": 1,
@@ -211,7 +180,66 @@ def parse(s: str, today: date | None = None) -> date:
 
             return advance_days(today, days_needed)
 
-    # --- 6. Parse absolute dates (e.g., "January 5th, 2025", "June 10") ---
+    # --- 5. Conversions for general offsets ("in 5 days", "two weeks ago") ---
+    has_rel_keyword = (
+        "ago" in words
+        or "in" in words
+        or "from" in words
+        or "next" in words
+        or "last" in words
+    )
+    if has_rel_keyword:
+        mult = -1 if "ago" in words or "last" in words else 1
+        total_days = 0
+        total_months = 0
+        curr_num = 1
+
+        num_map = {
+            "a": 1,
+            "an": 1,
+            "one": 1,
+            "two": 2,
+            "three": 3,
+            "four": 4,
+            "five": 5,
+            "six": 6,
+            "seven": 7,
+            "eight": 8,
+            "nine": 9,
+            "ten": 10,
+        }
+
+        for tok in words:
+            if tok in ("in", "ago", "from", "now", "and", "next", "last"):
+                continue
+            if tok.isdigit():
+                curr_num = int(tok)
+            elif tok in num_map:
+                curr_num = num_map[tok]
+            elif tok.startswith("day"):
+                total_days += curr_num
+                curr_num = 1
+            elif tok.startswith("week"):
+                total_days += curr_num * 7
+                curr_num = 1
+            elif tok.startswith("month"):
+                total_months += curr_num
+                curr_num = 1
+            elif tok.startswith("year"):
+                total_months += curr_num * 12
+                curr_num = 1
+        if total_days == 0 and total_months == 0 and len(words) >= 2:
+            if "week" in words or "weeks" in words:
+                total_days = 7
+            elif "month" in words or "months" in words:
+                total_months = 1
+            elif "year" in words or "years" in words:
+                total_months = 12
+
+        ref_out = advance_months(today, mult * total_months)
+        return advance_days(ref_out, mult * total_days)
+
+    # --- 6. Parse absolute dates ---
     months: dict[str, int] = {
         "jan": 1,
         "feb": 2,
