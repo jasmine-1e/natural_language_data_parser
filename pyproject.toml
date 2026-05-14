@@ -1,0 +1,20 @@
+[project]
+name = "natural-language-data-parser"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "mypy>=2.1.0",
+    "pytest>=9.0.3",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.15.12",
+]
+
+
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
