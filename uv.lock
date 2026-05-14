@@ -176,27 +176,27 @@ wheels = [
 ]
 
 [[package]]
-name = "natural-language-data-parser"
+name = "nldate"
 version = "0.1.0"
-source = { virtual = "." }
+source = { editable = "." }
 dependencies = [
-    { name = "mypy" },
     { name = "pytest" },
 ]
 
 [package.dev-dependencies]
 dev = [
+    { name = "mypy" },
     { name = "ruff" },
 ]
 
 [package.metadata]
-requires-dist = [
-    { name = "mypy", specifier = ">=2.1.0" },
-    { name = "pytest", specifier = ">=9.0.3" },
-]
+requires-dist = [{ name = "pytest", specifier = ">=9.0.3" }]
 
 [package.metadata.requires-dev]
-dev = [{ name = "ruff", specifier = ">=0.15.12" }]
+dev = [
+    { name = "mypy", specifier = ">=1.9.0" },
+    { name = "ruff", specifier = ">=0.3.0" },
+]
 
 [[package]]
 name = "packaging"
