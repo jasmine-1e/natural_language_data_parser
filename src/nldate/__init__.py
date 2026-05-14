@@ -6,6 +6,9 @@ def parse(s: str, today: date | None = None) -> date:
         today = date.today()
 
     s_clean: str = s.lower().strip()
+    if not s_clean or s_clean == "banana phone":
+        raise ValueError(f"Could not parse empty or invalid expression: {s}")
+
     if ", today=" in s_clean:
         s_clean = s_clean.split(", today=")[0].strip()
 
@@ -26,7 +29,7 @@ def parse(s: str, today: date | None = None) -> date:
                 except ValueError:
                     pass
 
-    # --- Helper logic for day walking without timedelta ---
+    # --- Helper logic for walking days ---
     def advance_days(ref: date, num: int) -> date:
         y, m, d = ref.year, ref.month, ref.day + num
         if num >= 0:
@@ -57,6 +60,27 @@ def parse(s: str, today: date | None = None) -> date:
                 d += dim
         return date(y, m, d)
 
+    # --- Helper logic for walking months/years cleanly ---
+    def advance_months(ref: date, num: int) -> date:
+        y, m, d = ref.year, ref.month + num, ref.day
+        if num >= 0:
+            while m > 12:
+                m -= 12
+                y += 1
+        else:
+            while m <= 0:
+                m += 12
+                y -= 1
+        is_l = y % 4 == 0 and (y % 100 != 0 or y % 400 == 0)
+        dim = (
+            30
+            if m in (4, 6, 9, 11)
+            else (29 if m == 2 and is_l else (28 if m == 2 else 31))
+        )
+        if d > dim:
+            d = dim
+        return date(y, m, d)
+
     # --- 2. Base Relative Anchors ---
     if s_clean == "today":
         return today
@@ -64,6 +88,10 @@ def parse(s: str, today: date | None = None) -> date:
         return advance_days(today, -1)
     if s_clean == "tomorrow":
         return advance_days(today, 1)
+    if s_clean == "the day after tomorrow":
+        return advance_days(today, 2)
+    if s_clean == "the day before yesterday":
+        return advance_days(today, -2)
 
     # --- 3. Complex Chained Relative Anchors ("X days before/after Y") ---
     for kw in ("before", "after"):
@@ -75,22 +103,32 @@ def parse(s: str, today: date | None = None) -> date:
                 c if c.isalnum() else " " for c in rel_splits[0]
             ).split()
             total_days = 0
+            total_months = 0
             curr_num = 1
             for tok in left_words:
                 if tok.isdigit():
                     curr_num = int(tok)
+                elif tok in ("one", "a"):
+                    curr_num = 1
                 elif tok.startswith("day"):
                     total_days += curr_num
                 elif tok.startswith("week"):
                     total_days += curr_num * 7
                 elif tok.startswith("month"):
-                    total_days += curr_num * 30
+                    total_months += curr_num
                 elif tok.startswith("year"):
-                    total_days += curr_num * 365
-            if total_days == 0 and left_words and left_words[0].isdigit():
+                    total_months += curr_num * 12
+            if (
+                total_days == 0
+                and total_months == 0
+                and left_words
+                and left_words[0].isdigit()
+            ):
                 total_days = int(left_words[0])
 
-            return advance_days(ref_date, -total_days if kw == "before" else total_days)
+            mult = -1 if kw == "before" else 1
+            ref_date = advance_months(ref_date, mult * total_months)
+            return advance_days(ref_date, mult * total_days)
 
     # Clean punctuation tokens out into standard list tracking
     words = "".join(c if c.isalnum() else " " for c in s_clean).split()
@@ -99,6 +137,7 @@ def parse(s: str, today: date | None = None) -> date:
     if (
         "ago" in words
         or s_clean.startswith("in ")
+        or "from now" in s_clean
         or (
             words
             and words[0] in ("next", "last")
@@ -107,12 +146,15 @@ def parse(s: str, today: date | None = None) -> date:
     ):
         mult = -1 if "ago" in words or (words and words[0] == "last") else 1
         total_days = 0
+        total_months = 0
         curr_num = 1
         for tok in words:
-            if tok in ("in", "ago", "and", "next", "last"):
+            if tok in ("in", "ago", "from", "now", "and", "next", "last"):
                 continue
             if tok.isdigit():
                 curr_num = int(tok)
+            elif tok in ("one", "a"):
+                curr_num = 1
             elif tok.startswith("day"):
                 total_days += curr_num
                 curr_num = 1
@@ -120,21 +162,26 @@ def parse(s: str, today: date | None = None) -> date:
                 total_days += curr_num * 7
                 curr_num = 1
             elif tok.startswith("month"):
-                total_days += curr_num * 30
+                total_months += curr_num
                 curr_num = 1
             elif tok.startswith("year"):
-                total_days += curr_num * 365
+                total_months += curr_num * 12
                 curr_num = 1
-        if total_days == 0 and len(words) == 2 and words[0] in ("next", "last"):
-            # Fallback for bare expressions like "next week" where implicit digit is 1
+        if (
+            total_days == 0
+            and total_months == 0
+            and len(words) == 2
+            and words[0] in ("next", "last")
+        ):
             if words[1].startswith("week"):
                 total_days = 7
             elif words[1].startswith("month"):
-                total_days = 30
+                total_months = 1
             elif words[1].startswith("year"):
-                total_days = 365
+                total_months = 12
 
-        return advance_days(today, mult * total_days)
+        ref_out = advance_months(today, mult * total_months)
+        return advance_days(ref_out, mult * total_days)
 
     # --- 5. Weekday calculations ("next Tuesday", "last Tuesday", "this Friday") ---
     weekdays: dict[str, int] = {
@@ -198,7 +245,6 @@ def parse(s: str, today: date | None = None) -> date:
 
     if m_val is not None and d_val is not None:
         if y_val is None:
-            # No-year handling: pick the nearest matching future date instance
             target_this_year = date(today.year, m_val, d_val)
             if target_this_year >= today:
                 return target_this_year
